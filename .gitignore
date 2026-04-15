@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+backend/__pycache__/
+
+# Environment variables (secrets)
+.env
+.env.local
+.env.*.local
+frontend/.env.local
+backend/.env
+
+# Python
+backend/venv/
+*.pyc
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*

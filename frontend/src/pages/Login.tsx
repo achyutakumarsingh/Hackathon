@@ -1,64 +1,71 @@
 import React, { useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { AuthService } from '../services/auth';
 import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { LogIn } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { toast } = useAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
 
-    if (error) {
-      setError(error.message);
+    try {
+      const data = await AuthService.signIn(email, password);
+      console.log('[Login] Success, session:', !!data.session);
+      toast('Login successful!', 'success');
+      // Navigate to feed after successful login
+      navigate('/feed');
+    } catch (error: any) {
+      toast(error.message || 'Login failed', 'error');
+      console.error('[Login] Error:', error.message);
+    } finally {
+      // ALWAYS reset button state
       setLoading(false);
-    } else {
-      navigate('/');
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-md border border-gray-100">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8 glow-card p-8 md:p-10">
+        <div className="text-center">
+          <div className="mx-auto w-12 h-12 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 rounded-xl flex items-center justify-center mb-6">
+             <LogIn className="w-6 h-6 stroke-[2]" />
+          </div>
+          <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+            Sign In
           </h2>
+          <p className="mt-2 text-sm text-slate-500 font-medium">Access your Civic Sense account</p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleLogin}>
-          {error && (
-            <div className="bg-red-50 p-3 rounded text-red-600 text-sm">{error}</div>
-          )}
-          <div className="rounded-md shadow-sm -space-y-px">
+          <div className="space-y-4">
             <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Email</label>
               <input
                 id="email-address"
                 name="email"
                 type="email"
                 required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Email address"
+                className="w-full bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 focus:border-indigo-500 outline-none font-medium text-sm transition-colors"
+                placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
             <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">Password</label>
               <input
                 id="password"
                 name="password"
                 type="password"
                 required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Password"
+                className="w-full bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 focus:border-indigo-500 outline-none font-medium text-sm transition-colors"
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -69,15 +76,15 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300"
+              className="w-full flex justify-center py-3.5 px-4 border border-transparent text-sm font-bold rounded-xl text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md shadow-indigo-500/20"
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </div>
         </form>
-        <div className="text-center text-sm">
-          <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
-            Don't have an account? Sign up
+        <div className="text-center text-sm font-semibold">
+          <Link to="/register" className="text-slate-500 hover:text-indigo-500 transition-colors">
+            Don't have an account? <span className="text-slate-700 dark:text-slate-300">Sign up</span>
           </Link>
         </div>
       </div>
