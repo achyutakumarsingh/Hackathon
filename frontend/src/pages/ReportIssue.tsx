@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { IssueService } from '../services/issues';
+import { MLService } from '../services/ml';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, UploadCloud, FileText, Camera, Check, ArrowRight, AlertTriangle, ThumbsUp, ChevronRight } from 'lucide-react';
+import { MapPin, UploadCloud, FileText, Camera, Check, ArrowRight, AlertTriangle, ThumbsUp, ChevronRight, Brain, Sparkles, Zap } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import { motion, AnimatePresence } from 'framer-motion';
 import 'leaflet/dist/leaflet.css';
@@ -44,6 +45,13 @@ export default function ReportIssue() {
   const [nearbyIssues, setNearbyIssues] = useState<any[]>([]);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [duplicatesDismissed, setDuplicatesDismissed] = useState(false);
+
+  // ML states
+  const [mlPriority, setMlPriority] = useState<any>(null);
+  const [mlClassification, setMlClassification] = useState<any>(null);
+  const [mlDuplicates, setMlDuplicates] = useState<any[]>([]);
+  const [mlLoading, setMlLoading] = useState(false);
+  const classifyTimer = useRef<any>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -104,13 +112,34 @@ export default function ReportIssue() {
   };
 
 
-  // If duplicates were found and not yet dismissed, stay on step 2 with overlay
-  useEffect(() => {
-    if (nearbyIssues.length === 0 && !checkingDuplicates && step === 2 && location && !duplicatesDismissed) {
-      // No duplicates found from a check — auto-advance
-      // But only if a check was actually done (nearbyIssues starts empty, so we need a flag)
+  // ML auto-classify when description changes (debounced)
+  const handleDescriptionChange = (text: string) => {
+    setDescription(text);
+    if (classifyTimer.current) clearTimeout(classifyTimer.current);
+    if (text.length > 15) {
+      classifyTimer.current = setTimeout(async () => {
+        try {
+          const result = await MLService.classifyIssue(text);
+          setMlClassification(result);
+        } catch { /* ML API unavailable — silent fail */ }
+      }, 800);
     }
-  }, [nearbyIssues, checkingDuplicates, step, location, duplicatesDismissed]);
+  };
+
+  // ML priority prediction when moving to review
+  const runMlAnalysis = async () => {
+    if (!description || description.length < 10) return;
+    setMlLoading(true);
+    try {
+      const [priority, dupes] = await Promise.allSettled([
+        MLService.predictPriority(description, category),
+        MLService.findDuplicates(description, category, location?.lat, location?.lng),
+      ]);
+      if (priority.status === 'fulfilled') setMlPriority(priority.value);
+      if (dupes.status === 'fulfilled') setMlDuplicates(dupes.value.duplicates || []);
+    } catch { /* silent */ }
+    finally { setMlLoading(false); }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,7 +302,7 @@ export default function ReportIssue() {
                  </motion.div>
                )}
 
-               {/* ── STEP 3: Details ── */}
+               {/* ── STEP 3: Details + ML Analysis ── */}
                {step === 3 && (
                  <motion.div key="3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.2 }}>
                     <div className="space-y-4">
@@ -285,9 +314,81 @@ export default function ReportIssue() {
                            ))}
                          </div>
                        </div>
-                       <div><label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Description</label><textarea required value={description} onChange={e=>setDescription(e.target.value)} rows={4} className="w-full bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 focus:border-indigo-500 outline-none font-medium text-sm resize-none transition-colors" placeholder="Describe the issue in detail..." /></div>
+                       <div>
+                         <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Description</label>
+                         <textarea required value={description} onChange={e => handleDescriptionChange(e.target.value)} rows={4} className="w-full bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 focus:border-indigo-500 outline-none font-medium text-sm resize-none transition-colors" placeholder="Describe the issue in detail..." />
+                       </div>
+
+                       {/* ── ML Auto-Classification Suggestion ── */}
+                       {mlClassification && mlClassification.predicted_category !== category && mlClassification.confidence > 0.3 && (
+                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-2 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg p-3">
+                           <Sparkles className="w-4 h-4 text-violet-600 shrink-0" />
+                           <span className="text-xs text-violet-800 dark:text-violet-300 font-medium">ML suggests this is a <strong>{mlClassification.predicted_category}</strong> issue ({Math.round(mlClassification.confidence * 100)}% confidence)</span>
+                           <button type="button" onClick={() => { setCategory(mlClassification.predicted_category); setMlClassification(null); }} className="ml-auto text-[10px] font-bold bg-violet-600 text-white px-2 py-1 rounded-md hover:bg-violet-700 transition">Apply</button>
+                         </motion.div>
+                       )}
                     </div>
-                    <div className="flex gap-4 mt-8">
+
+                    {/* ── ML Analysis Button ── */}
+                    <button type="button" onClick={runMlAnalysis} disabled={mlLoading || description.length < 10}
+                      className="mt-4 w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-bold py-3 rounded-xl shadow-md shadow-violet-500/20 disabled:opacity-40 hover:opacity-90 transition"
+                    >
+                      <Brain className="w-4 h-4" />
+                      {mlLoading ? 'Analyzing...' : 'Run ML Analysis'}
+                    </button>
+
+                    {/* ── ML Priority Result ── */}
+                    {mlPriority && (
+                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Zap className="w-4 h-4 text-amber-500" />
+                          <span className="text-xs font-bold text-slate-900 dark:text-white uppercase">ML Priority Analysis</span>
+                        </div>
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase ${
+                            mlPriority.level === 'critical' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                            mlPriority.level === 'high' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                            mlPriority.level === 'medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                            'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          }`}>{mlPriority.level}</div>
+                          <div className="flex-1 bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+                            <div className={`h-2 rounded-full transition-all ${
+                              mlPriority.score > 0.7 ? 'bg-red-500' :
+                              mlPriority.score > 0.5 ? 'bg-orange-500' :
+                              mlPriority.score > 0.3 ? 'bg-amber-500' : 'bg-green-500'
+                            }`} style={{ width: `${mlPriority.score * 100}%` }} />
+                          </div>
+                          <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-400">{Math.round(mlPriority.score * 100)}%</span>
+                        </div>
+                        {mlPriority.keyword_matches?.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {mlPriority.keyword_matches.map((kw: string) => (
+                              <span key={kw} className="text-[10px] bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 px-2 py-0.5 rounded-md font-bold">{kw}</span>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+
+                    {/* ── ML Duplicates Result ── */}
+                    {mlDuplicates.length > 0 && (
+                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-600" />
+                          <span className="text-xs font-bold text-amber-800 dark:text-amber-300">ML found {mlDuplicates.length} potentially similar report(s)</span>
+                        </div>
+                        {mlDuplicates.slice(0, 3).map((d: any) => (
+                          <div key={d.issue_id} className="bg-white dark:bg-slate-800 rounded-lg p-2.5 mb-1.5 border border-amber-100 dark:border-amber-900/30 flex items-center justify-between">
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{d.title || 'Untitled'}</p>
+                              <p className="text-[10px] text-slate-500">{Math.round(d.similarity * 100)}% similar</p>
+                            </div>
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+
+                    <div className="flex gap-4 mt-6">
                        <button type="button" onClick={() => setStep(2)} className="btn-ghost flex-1 border border-slate-200 dark:border-slate-800">Back</button>
                        <button type="submit" disabled={loading} className="flex-[2] bg-indigo-600 text-white font-bold rounded-xl py-3.5 shadow-md shadow-indigo-500/20 disabled:opacity-50 hover:bg-indigo-700 transition flex items-center justify-center gap-2">
                           {loading ? 'Submitting...' : 'Submit Report'} <Check className="w-4 h-4"/>
